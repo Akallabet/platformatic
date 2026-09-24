@@ -83,8 +83,7 @@ export const db = {
       ]
     },
     saveDispatch: {
-      type: 'boolean',
-      default: false
+      type: 'boolean'
     },
     graphql: {
       anyOf: [
