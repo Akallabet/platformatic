@@ -6,6 +6,7 @@ A set of operation methods are available on each entity:
 - [`count`](#count)
 - [`insert`](#insert)
 - [`save`](#save)
+- [`update`](#update)
 - [`delete`](#delete)
 - [`updateMany`](#updatemany)
 
@@ -354,6 +355,7 @@ Unlike `save`, `update` never inserts: it resolves to `null` if no row matches t
 |---|---|---|
 | `fields` | Array of `string` | List of fields to be returned |
 | `input` | `Object` | The row to update, including its primary keys
+| `ctx` | `Object` | Request context, used by hooks such as the ones of [authorization](../../db/authorization/overview.md)
 | `tx` | `Object` | Transaction to run the query in
 
 #### Usage

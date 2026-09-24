@@ -71,6 +71,14 @@ main()
 
 Set the `saveDispatch` option of [`connect`](../overview.md) (or `db.saveDispatch` in the Platformatic DB [configuration](../../db/configuration.md)) to `true` to make `save` a dispatcher. It calls `entity.update` when all the primary keys are present and, if no row was updated, `entity.insert`. Their hooks are therefore applied:
 
+| Call | `saveDispatch: false` | `saveDispatch: true` |
+|---|---|---|
+| `save` without all the primary keys | `save` | `save`, `insert` |
+| `save` with the primary keys of an existing row | `save` | `save`, `update` |
+| `save` with the primary keys of a missing row | `save` | `save`, `update` (resolves to `null`), `insert` |
+| `update` | `update` | `update` |
+| `insert` | `insert` | `insert` |
+
 
 ## Multiple Hooks
 

@@ -206,10 +206,18 @@ async function auth (app, opts) {
         return { request, rule }
       }
 
+      // type.primaryKeys holds the column names, while the input and the where
+      // conditions use the camel-cased field names
+      const primaryKeyFields = Array.from(type.primaryKeys, key => type.fields[key].camelcase)
+
+      function hasAllPrimaryKeys (input) {
+        return primaryKeyFields.every(key => input[key] !== undefined)
+      }
+
       // The row to be updated must be visible through the save rule
       async function checkRowIsSavable (ctx, request, rule, input, fields, tx) {
         const whereConditions = {}
-        for (const key of type.primaryKeys) {
+        for (const key of primaryKeyFields) {
           whereConditions[key] = { eq: input[key] }
         }
 
@@ -252,7 +260,8 @@ async function auth (app, opts) {
         },
 
         async update (originalUpdate, { input, ctx, fields, skipAuth, ...restOpts }) {
-          if (useOriginal(skipAuth, ctx)) {
+          // The mapper rejects a missing input or primary key with its own errors
+          if (useOriginal(skipAuth, ctx) || !input || !hasAllPrimaryKeys(input)) {
             return originalUpdate({ ctx, input, fields, ...restOpts })
           }
           const { request, rule } = await authorizeSave(ctx, fields, input)
@@ -262,7 +271,8 @@ async function auth (app, opts) {
         },
 
         async insert (originalInsert, { inputs, ctx, fields, skipAuth, ...restOpts }) {
-          if (useOriginal(skipAuth, ctx)) {
+          // The mapper rejects a missing input with its own error
+          if (useOriginal(skipAuth, ctx) || !inputs) {
             return originalInsert({ inputs, ctx, fields, ...restOpts })
           }
           await authorizeSave(ctx, fields, inputs)
@@ -324,17 +334,13 @@ async function auth (app, opts) {
       // With saveDispatch, save goes through the update and insert hooks above
       if (!app.platformatic.saveDispatch) {
         hooks.save = async function save (originalSave, { input, ctx, fields, skipAuth, ...restOpts }) {
-          if (useOriginal(skipAuth, ctx)) {
+          // The mapper rejects a missing input with its own error
+          if (useOriginal(skipAuth, ctx) || !input) {
             return originalSave({ ctx, input, fields, ...restOpts })
           }
           const { request, rule } = await authorizeSave(ctx, fields, input)
 
-          let hasAllPrimaryKeys = false
-          for (const key of type.primaryKeys) {
-            hasAllPrimaryKeys = hasAllPrimaryKeys || input[key] !== undefined
-          }
-
-          if (hasAllPrimaryKeys) {
+          if (hasAllPrimaryKeys(input)) {
             await checkRowIsSavable(ctx, request, rule, input, fields, restOpts.tx)
           }
 

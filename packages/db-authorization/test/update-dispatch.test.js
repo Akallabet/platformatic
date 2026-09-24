@@ -3,9 +3,26 @@ import fastify from 'fastify'
 import { deepEqual, equal } from 'node:assert'
 import { test } from 'node:test'
 import auth from '../index.js'
-import { clear, connInfo, createBasicPages } from './helper.js'
+import { clear, connInfo, createBasicPages, isSQLite } from './helper.js'
 
-async function setup (t, saveDispatch) {
+// Same as createBasicPages, but the primary key column is not camel-cased
+async function createSnakeCasePkPages (db, sql) {
+  if (isSQLite) {
+    await db.query(sql`CREATE TABLE IF NOT EXISTS pages (
+      page_id INTEGER PRIMARY KEY,
+      title VARCHAR(42),
+      user_id INTEGER
+    );`)
+  } else {
+    await db.query(sql`CREATE TABLE IF NOT EXISTS pages (
+      page_id SERIAL PRIMARY KEY,
+      title VARCHAR(42),
+      user_id INTEGER
+    );`)
+  }
+}
+
+async function setup (t, saveDispatch, createPages = createBasicPages) {
   const app = fastify()
   const state = { defaultsCalls: 0, run: null }
 
@@ -14,7 +31,7 @@ async function setup (t, saveDispatch) {
     saveDispatch,
     async onDatabaseLoad (db, sql) {
       await clear(db, sql)
-      await createBasicPages(db, sql)
+      await createPages(db, sql)
     }
   })
 
@@ -145,5 +162,71 @@ for (const saveDispatch of [false, true]) {
     })
     equal(res.statusCode, 200, res.body)
     equal(res.json().title, 'Admin')
+  })
+
+  test(`${mode} - update without an input or a primary key keeps the mapper errors`, async t => {
+    const { run } = await setup(t, saveDispatch)
+
+    let res = await run((entity, ctx) => entity.update({ input: { title: 'No PK' }, ctx }))
+    equal(res.statusCode, 500, res.body)
+    equal(res.json().code, 'PLT_SQL_MAPPER_MISSING_VALUE_FOR_PRIMARY_KEY')
+
+    res = await run((entity, ctx) => entity.update({ ctx }))
+    equal(res.statusCode, 500, res.body)
+    equal(res.json().code, 'PLT_SQL_MAPPER_INPUT_NOT_PROVIDED')
+  })
+
+  test(`${mode} - save without an input keeps the mapper error`, async t => {
+    const { run } = await setup(t, saveDispatch)
+
+    const res = await run((entity, ctx) => entity.save({ ctx }))
+    equal(res.statusCode, 500, res.body)
+    equal(res.json().code, 'PLT_SQL_MAPPER_INPUT_NOT_PROVIDED')
+  })
+
+  test(`${mode} - insert without inputs keeps the mapper error`, async t => {
+    const { run } = await setup(t, saveDispatch)
+
+    const res = await run((entity, ctx) => entity.insert({ ctx }))
+    equal(res.statusCode, 500, res.body)
+    equal(res.json().code, 'PLT_SQL_MAPPER_INPUT_NOT_PROVIDED')
+  })
+
+  test(`${mode} - snake_case PK - update with an authorized ctx`, async t => {
+    const { page, run } = await setup(t, saveDispatch, createSnakeCasePkPages)
+    const [own] = await page.insert({ inputs: [{ title: 'Mine', userId: 42 }] })
+
+    const res = await run((entity, ctx) => entity.update({ input: { pageId: own.pageId, title: 'Updated' }, ctx }))
+    equal(res.statusCode, 200, res.body)
+    deepEqual(res.json(), { pageId: own.pageId, title: 'Updated', userId: 42 })
+  })
+
+  test(`${mode} - snake_case PK - update of a row owned by someone else is 403`, async t => {
+    const { page, run } = await setup(t, saveDispatch, createSnakeCasePkPages)
+    const [other] = await page.insert({ inputs: [{ title: 'Theirs', userId: 99 }] })
+
+    const res = await run((entity, ctx) => entity.update({ input: { pageId: other.pageId, title: 'Stolen' }, ctx }))
+    equal(res.statusCode, 403, res.body)
+    const [row] = await page.find({ where: { pageId: { eq: other.pageId } } })
+    equal(row.title, 'Theirs')
+  })
+
+  test(`${mode} - snake_case PK - save of a row owned by someone else is 403`, async t => {
+    const { page, run } = await setup(t, saveDispatch, createSnakeCasePkPages)
+    const [other] = await page.insert({ inputs: [{ title: 'Theirs', userId: 99 }] })
+
+    const res = await run((entity, ctx) => entity.save({ input: { pageId: other.pageId, title: 'Stolen' }, ctx }))
+    equal(res.statusCode, 403, res.body)
+    const [row] = await page.find({ where: { pageId: { eq: other.pageId } } })
+    equal(row.title, 'Theirs')
+  })
+
+  test(`${mode} - snake_case PK - save of an owned row`, async t => {
+    const { page, run } = await setup(t, saveDispatch, createSnakeCasePkPages)
+    const [own] = await page.insert({ inputs: [{ title: 'Mine', userId: 42 }] })
+
+    const res = await run((entity, ctx) => entity.save({ input: { pageId: own.pageId, title: 'Updated' }, ctx }))
+    equal(res.statusCode, 200, res.body)
+    deepEqual(res.json(), { pageId: own.pageId, title: 'Updated', userId: 42 })
   })
 }
