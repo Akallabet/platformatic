@@ -714,6 +714,10 @@
             }
           ]
         },
+        "saveDispatch": {
+          "type": "boolean",
+          "default": false
+        },
         "graphql": {
           "anyOf": [
             {
